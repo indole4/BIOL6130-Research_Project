@@ -1,0 +1,368 @@
+---
+title: "Marsupial trait analysis"
+author: "u8448413 Chen Anye"
+date: "2026-11-04"
+output:
+  html_document:
+    self_contained: true
+
+---
+
+## Read the data
+
+```{r setup, message=FALSE}
+knitr::opts_chunk$set(
+  dev = c("png","pdf"),
+  dpi = 300,
+  fig.path = "figures/"
+)
+
+library(tidyverse)
+library(ape)
+library(cluster)
+
+raw <- read_tsv("source/MamFuncDat.txt", col_types = cols(.default = "c"),
+                na = character(), skip_empty_rows = FALSE)
+mdd <- read_csv("source/MDD_v2.5_6904species.csv",
+                col_types = cols(.default = "c"), na = character())
+tree_tax <- read_csv("source/taxonomy_mamPhy_5911species_toPublish.csv",
+                     col_types = cols(.default = "c"), na = character())
+source_tree <- read.tree(paste0(
+  "Completed_5911sp_topoCons_FBDasZhouEtAl/",
+  "MamPhy_BDvr_Completed_5911sp_topoCons_FBDasZhouEtAl_v2_tree0000.tre"
+))
+normal_name <- function(x) str_trim(str_replace_all(x, "_", " "))
+```
+
+## Select marsupials
+
+```{r}
+families <- c(
+  "Didelphidae", "Caenolestidae", "Microbiotheriidae", "Dasyuridae",
+  "Myrmecobiidae", "Notoryctidae", "Peramelidae", "Thylacomyidae",
+  "Phascolarctidae", "Vombatidae", "Burramyidae", "Phalangeridae",
+  "Pseudocheiridae", "Petauridae", "Tarsipedidae", "Acrobatidae",
+  "Hypsiprymnodontidae", "Potoroidae", "Macropodidae"
+)
+mars_raw <- raw %>%
+  mutate(source_row = row_number(), Scientific = normal_name(Scientific)) %>%
+  filter(!is.na(Scientific), !Scientific %in% c("", "NA"), MSWFamilyLatin %in% families)
+nrow(mars_raw)
+```
+
+## Match species names and the tree
+
+```{r}
+# Keep names that identify exactly one MDD record.
+mdd_names <- mdd %>%
+  select(mdd_id = id, sciName, MSW3_sciName,
+         mdd_extinct = extinct, diffSinceMSW3, countryDistribution,
+         continentDistribution) %>%
+  pivot_longer(c(sciName, MSW3_sciName), values_to = "Scientific") %>%
+  mutate(Scientific = normal_name(Scientific)) %>%
+  filter(!is.na(Scientific), !Scientific %in% c("", "NA")) %>%
+  distinct(Scientific, mdd_id, .keep_all = TRUE) %>%
+  add_count(Scientific) %>%
+  filter(n == 1) %>%
+  select(-name, -n)
+
+marsupial_source_tree <- keep.tip(source_tree, tree_tax %>%
+  filter(higher == "Marsupialia", Species_Name %in% source_tree$tip.label) %>%
+  pull(Species_Name))
+tree_names <- tree_tax %>%
+  filter(extinct. == "0", Species_Name %in% marsupial_source_tree$tip.label) %>%
+  transmute(Scientific = normal_name(Species_Name), tree_tip = Species_Name)
+mars <- mars_raw %>%
+  inner_join(mdd_names, by = "Scientific") %>%
+  filter(mdd_extinct == "0", diffSinceMSW3 == "0") %>%
+  inner_join(tree_names, by = "Scientific")
+```
+
+## Select regions and reliable traits
+
+```{r}
+american_families <- c("Didelphidae", "Caenolestidae", "Microbiotheriidae")
+diet_columns <- paste0("Diet-", c(
+  "Inv", "Vend", "Vect", "Vfish", "Vunk", "Scav", "Fruit", "Nect", "Seed", "PlantO"
+))
+mars <- mars %>%
+  mutate(
+    australia = str_detect(countryDistribution, "(^|\\|)\\s*Australia\\s*(\\||$)"),
+    americas = str_detect(continentDistribution, "(^|\\|)\\s*(North|South) America\\s*(\\||$)"),
+    american_family = MSWFamilyLatin %in% american_families,
+    region = case_when(
+      australia & !americas & !american_family ~ "Australia",
+      americas & !australia & american_family ~ "Americas"
+    ),
+    across(all_of(c(diet_columns, "BodyMass-Value")), as.numeric)
+  ) %>%
+  filter(
+    !is.na(region), !countryDistribution %in% c("", "NA"),
+    `Diet-Certainty` == "ABC", `ForStrat-Certainty` == "A", `BodyMass-SpecLevel` == "1",
+    `ForStrat-Value` %in% c("G", "S", "Ar", "A", "M"),
+    is.finite(`BodyMass-Value`), `BodyMass-Value` > 0,
+    if_all(all_of(diet_columns), ~ is.finite(.x) & between(.x, 0, 100)),
+    abs(rowSums(select(., all_of(diet_columns))) - 100) < 1e-8
+  ) %>%
+  add_count(mdd_id, name = "id_n") %>%
+  add_count(tree_tip, name = "tip_n") %>%
+  filter(id_n == 1, tip_n == 1) %>%
+  select(source_row, Scientific, tree_tip, region,
+         `BodyMass-Value`, `ForStrat-Value`, all_of(diet_columns))
+mars
+```
+
+## Define dietary groups
+
+I assume that if any kind of diet is over 50, this species is in this diet group. If tnere is not any kind of diet over 50%, put it in Omnivores. 
+
+```{r}
+# More than 50% defines the dominant food group.
+
+mars <- mars %>%
+  mutate(
+    vertebrate_percent = `Diet-Vend` + `Diet-Vect` + `Diet-Vfish` + `Diet-Vunk`,
+    plant_percent = `Diet-Fruit` + `Diet-Nect` + `Diet-Seed` + `Diet-PlantO`,
+    diet_group = case_when(
+      `Diet-Inv` > 50 ~ "Invertebrates",
+      vertebrate_percent > 50 ~ "Vertebrates",
+      plant_percent > 50 ~ "Plants",
+      TRUE ~ "Omnivores"
+    )
+  ) %>%
+  select(source_row, Scientific, tree_tip, region, diet_group,
+         `BodyMass-Value`, `ForStrat-Value`)
+head(mars)
+mars %>% count(diet_group, region)
+```
+
+## Final dataset
+
+```{r}
+analysis_tree <- keep.tip(marsupial_source_tree, mars$tree_tip)
+mars <- mars[match(analysis_tree$tip.label, mars$tree_tip), ]
+mars_regions <- mars
+mars_australia <- filter(mars, region == "Australia")
+mars_americas <- filter(mars, region == "Americas")
+excluded_records <- anti_join(mars_raw, mars, by = "source_row")
+mars %>% count(region)
+mars_australia
+excluded_records
+```
+
+## Overall Gower distances
+
+```{r}
+gower_summary <- function(dat, include_diet = FALSE) {
+  traits <- dat %>%
+    transmute(log_mass = log10(`BodyMass-Value`), # log the weight
+              stratum = factor(`ForStrat-Value`)) # define the startum
+  weights <- c(1, 1)
+
+  if (include_diet) {
+    # Diet is same groups score 0, different groups score 1.
+    traits <- mutate(traits, diet_group = factor(dat$diet_group))
+    weights <- c(1, 1, 1)  # Equal weights
+  }
+
+  D <- as.matrix(daisy(as.data.frame(traits), metric = "gower",
+                       weights = weights, warnBin = FALSE))
+  au <- dat$region == "Australia"
+  am <- dat$region == "Americas"
+  mean_within <- function(index) {
+    if (sum(index) < 2) return(NA)  # At least two species
+    within <- D[index, index, drop = FALSE]
+    mean(within[lower.tri(within)]) 
+  }
+  au_mean <- mean_within(au)
+  am_mean <- mean_within(am)
+  tibble(n_Australia = sum(au), n_Americas = sum(am),
+         mean_Australia = au_mean, mean_Americas = am_mean,
+         delta = au_mean - am_mean)
+}
+
+overall_gower <- gower_summary(mars, include_diet = TRUE)
+overall_gower
+```
+
+## Gower distances within dietary groups
+
+```{r}
+
+group_gower <- bind_rows(
+  Invertebrates = gower_summary(filter(mars, diet_group == "Invertebrates")),
+  Vertebrates = gower_summary(filter(mars, diet_group == "Vertebrates")),
+  Plants = gower_summary(filter(mars, diet_group == "Plants")),
+  Omnivores = gower_summary(filter(mars, diet_group == "Omnivores")),
+  .id = "group"
+)
+group_gower
+
+delta_inv <- group_gower$delta[group_gower$group == "Invertebrates"]
+delta_ver <- group_gower$delta[group_gower$group == "Vertebrates"]
+delta_plant <- group_gower$delta[group_gower$group == "Plants"]
+
+```
+
+
+```{r gower_plots}
+plot_data <- bind_rows(
+  mutate(overall_gower, group = "Overall"),
+  group_gower
+) %>%
+  mutate(
+    group = factor(
+      group,
+      levels = c("Overall", "Invertebrates", "Vertebrates",
+                 "Plants", "Omnivores")
+    ),
+    analysis = if_else(group == "Overall",
+                       "Overall: three traits", "Within groups: two traits")
+  )
+
+plot_long <- plot_data %>%
+  pivot_longer(c(mean_Australia, mean_Americas),
+               names_to = "region", values_to = "mean_gower") %>%
+  mutate(
+    region = str_remove(region, "mean_"),
+    n = if_else(region == "Australia", n_Australia, n_Americas)
+  )
+
+region_colours <- c(Australia = "#BCEB0C", Americas = "#892F99")
+
+
+
+
+ggplot(plot_long, aes(group, mean_gower, colour = region, shape = region)) +
+  geom_point(position = position_dodge(width = 0.45), size = 3) +
+  geom_text(aes(label = paste0("n = ", n)),
+            position = position_dodge(width = 0.45),
+            vjust = -1, size = 3, show.legend = FALSE) +
+  facet_grid(~ analysis, scales = "free_x", space = "free_x") +
+  scale_colour_manual(values = region_colours) +
+  scale_shape_manual(values = c(Australia = 16, Americas = 17)) +
+  scale_y_continuous(limits = c(0, NA),
+                     expand = expansion(mult = c(0.03, 0.15))) +
+  labs(x = NULL, y = "Mean within-region Gower distance",
+       colour = NULL, shape = NULL) +
+  theme_minimal() +
+  theme(legend.position = "top")
+
+
+
+delta_limit <- max(abs(plot_data$delta)) * 1.25
+
+ggplot(plot_data, aes(group, delta)) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
+  geom_col(aes(fill = if_else(delta > 0, "Australia", "Americas")),
+           width = 0.55, show.legend = FALSE) +
+  geom_text(aes(label = sprintf("%.3f", delta),
+                vjust = if_else(delta > 0, -0.5, 1.5)), size = 3.5) +
+  scale_fill_manual(values = region_colours) +
+  scale_y_continuous(limits = c(-delta_limit, delta_limit)) +
+  labs(x = NULL, y = "Mean Gower difference (Australia - Americas)") +
+  theme_minimal()
+
+
+```
+
+```{r PCA_plots}
+pcoa_plot <- function(dat, include_diet = FALSE, title = "PCoA") {
+
+  traits <- dat %>%
+    transmute(log_mass = log10(`BodyMass-Value`),
+              stratum = factor(`ForStrat-Value`))
+
+  if (include_diet) {
+    traits$diet_group <- factor(dat$diet_group)
+  }
+
+  D <- cluster::daisy(
+    as.data.frame(traits), metric = "gower",
+    weights = rep(1, ncol(traits)), warnBin = FALSE
+  )
+
+  # Correct negative eigenvalues for plotting only.
+  fit <- ape::pcoa(D, correction = "lingoes", rn = dat$Scientific)
+  corrected <- !is.null(fit$vectors.cor)
+
+  # Use coordinates and percentages from the same solution.
+  axes <- if (corrected) fit$vectors.cor else fit$vectors
+  proportion <- if (corrected) fit$values$Rel_corr_eig else fit$values$Relative_eig
+
+  plot_data <- dat %>%
+    mutate(PCoA1 = axes[, 1], PCoA2 = axes[, 2])
+
+  p <- ggplot(plot_data, aes(PCoA1, PCoA2, colour = region)) +
+    geom_point(size = 2.5, alpha = 0.8) +
+    coord_equal() +
+    scale_colour_manual(
+      values = c(Australia = "#BCEB0C", Americas = "#892F99")
+    ) +
+    labs(
+      title = title,
+      colour = "Region",
+      x = sprintf("PCoA1 (%.1f%%)", 100 * proportion[1]),
+      y = sprintf("PCoA2 (%.1f%%)", 100 * proportion[2]),
+      caption = if (corrected) "Lingoes-corrected Gower distances" else "Gower distances"
+    ) +
+    theme_minimal()
+
+  # Show dietary groups as different shapes in the overall plot.
+  if (include_diet) {
+    p <- p + aes(shape = diet_group) + labs(shape = "Diet group")
+  }
+
+  p
+}
+
+pcoa_plot(mars, include_diet = TRUE, title = "Overall PCoA")
+
+pcoa_plot(
+  filter(mars, diet_group == "Invertebrates"),
+  title = "Invertebrates"
+)
+
+pcoa_plot(
+  filter(mars, diet_group == "Vertebrates"),
+  title = "Vertebrates"
+)
+
+pcoa_plot(
+  filter(mars, diet_group == "Plants"),
+  title = "Plants"
+)
+
+pcoa_plot(
+  filter(mars, diet_group == "Omnivores"),
+  title = "Omnivores / residual category"
+)
+
+
+```
+
+
+```{r phylogeny, fig.width=10, fig.height=20}
+tree_regions <- mars$region[match(analysis_tree$tip.label, mars$tree_tip)]
+edge_colours <- region_colours[tree_regions[analysis_tree$edge[, 2]]]
+edge_colours[is.na(edge_colours)] <- "grey60"
+
+# Keep labels black and make branches thicker.
+plot(analysis_tree, use.edge.length = TRUE, cex = 0.6,
+     tip.color = "black",
+     edge.color = edge_colours,
+     edge.width = 3)
+legend("topleft",
+       legend = c("Australia", "Americas"),
+       col = region_colours[c("Australia", "Americas")],
+       lty = 1, lwd = 3,
+       bty = "n", cex = 0.9)
+```
+
+
+
+
+
+
+
+
