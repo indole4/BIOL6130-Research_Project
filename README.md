@@ -36,6 +36,8 @@ checks the archive, and extracts 10,000 `.tre` files into
 `Completed_5911sp_topoCons_FBDasZhouEtAl/` under the root. The tree data are from
 [Upham, Esselstyn and Jetz (2019)](https://data.vertlife.org/mammaltree/Completed_5911sp_topoCons_FBDasZhouEtAl.zip).
 
+Or run `download.R` under root.
+
 Then run `final.rmd`, when knit, there should be plots output in the folder `figures_for_poster` under root.
 
 ## Data sources and licences
