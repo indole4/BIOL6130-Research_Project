@@ -892,7 +892,6 @@ comparison_table <- comparison_table %>%
 ### 6.3 plot
 
 ```{r}
-# 1. 设置组别顺序和面板标签
 poster_null <- comparison_table %>%
   mutate(
     group = factor(group, levels = rev(c("Overall", poster_diets))),
@@ -903,13 +902,10 @@ poster_null <- comparison_table %>%
     )
   )
 
-# 2. 绘制观测差值和零模型预期
 p_null <- ggplot(poster_null, aes(y = group)) +
 
-  # 零线：澳洲和美洲的平均 Gower 距离相等
   geom_vline(xintercept = 0, linetype = "dashed", colour = "grey60") +
 
-  # 灰线：零模型模拟差值的中央 95% 区间
   geom_linerange(
     aes(xmin = sim_low, xmax = sim_high),
     orientation = "y",
@@ -917,7 +913,6 @@ p_null <- ggplot(poster_null, aes(y = group)) +
     linewidth = 2
   ) +
 
-  # 空心点：零模型均值；实心点：观测差值
   geom_point(aes(x = delta_expected, shape = "Model mean"), size = 3) +
   geom_point(aes(x = delta_obs, shape = "Observed"), size = 3) +
 
