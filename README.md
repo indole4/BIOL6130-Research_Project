@@ -34,7 +34,7 @@ The analysis uses three files in `source/`:
 On the first run, download  the tree archive from VertLife,
 checks the archive, and extracts 10,000 `.tre` files into
 `Completed_5911sp_topoCons_FBDasZhouEtAl/` under the root. The tree data are from
-[Upham, Esselstyn and Jetz (2019)](https://data.vertlife.org/mammaltree/DNAonly_4098sp_topoFree_FBDasZhouEtAl.zip).
+[Upham, Esselstyn and Jetz (2019)](https://data.vertlife.org/mammaltree/Completed_5911sp_topoCons_FBDasZhouEtAl.zip).
 
 Then run `final.rmd`, when knit, there should be plots output in the folder `figures_for_poster` under root.
 
