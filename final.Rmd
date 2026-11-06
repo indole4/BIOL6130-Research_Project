@@ -42,11 +42,11 @@ Due to the different environment and the compose of animals in Australia and Ame
 ### 2.1 read data in
 ```{r}
 # read the data in
-raw <- read_tsv("source/MamFuncDat.txt", col_types = cols(.default = "c"),
+raw <- read_tsv("data/raw/MamFuncDat.txt", col_types = cols(.default = "c"),
                 na = character(), skip_empty_rows = FALSE)
-mdd <- read_csv("source/MDD_v2.5_6904species.csv",
+mdd <- read_csv("data/raw/MDD_v2.5_6904species.csv",
                 col_types = cols(.default = "c"), na = character())
-tree_tax <- read_csv("source/taxonomy_mamPhy_5911species_toPublish.csv",
+tree_tax <- read_csv("data/raw/taxonomy_mamPhy_5911species_toPublish.csv",
                      col_types = cols(.default = "c"), na = character())
 source_tree <- read.tree(paste0(
   "Completed_5911sp_topoCons_FBDasZhouEtAl/",
