@@ -25,7 +25,7 @@ install.packages(
 
 ### 2. Prepare the data
 
-The analysis uses three files in `source/`:
+The analysis uses three files in `data/raw/`:
 
 - `MamFuncDat.txt` contains the species traits.
 - `MDD_v2.5_6904species.csv` supplies taxonomic and geographic information.
