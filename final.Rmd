@@ -85,7 +85,6 @@ mdd_names <- mdd %>%select(mdd_id = id,
     continentDistribution)
 
 
-# 把当前名称和旧名称放进同一个 Scientific 列
 mdd_names <- mdd_names %>% pivot_longer(
     c(sciName, MSW3_sciName),
     values_to = "Scientific"
@@ -300,13 +299,11 @@ poster_n
 ### 3.2 sample size
 
 ```{r}
-# 负号只用于让澳洲的柱子向左绘制
 sample_plot_data <- poster_n %>%
   mutate(
     n_plot = if_else(region == "Australia", -n, n)
   )
 
-# 两侧采用相同的坐标范围
 sample_limit <- max(poster_n$n) * 1.25
 
 (p_sample <- ggplot(
